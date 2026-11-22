@@ -1,0 +1,6 @@
+claimed 1, 2 for 60000 ms
+visible now 3
+acked 2
+consumed 3
+left in the queue 0
+dead entries 0

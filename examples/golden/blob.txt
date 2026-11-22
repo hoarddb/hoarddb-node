@@ -1,0 +1,4 @@
+stored hello.txt 14 bytes
+read hello, hoardDB text/plain
+missing is NOT_FOUND
+count 1

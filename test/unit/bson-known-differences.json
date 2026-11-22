@@ -1,0 +1,104 @@
+{
+  "_about": "Known differences between the Node codec and testdata/bson-vectors/v1.json, re-derived against this codec (the five ported fixes included). Each entry: verdict (deliberate: a documented refusal or residual of this driver; acceptable: the same value in another form, or accepted by the server and the owner), what Node does, what the corpus says, the reason. test/unit/bson-corpus.test.ts reads this file, skips nothing, fails on any vector not listed here, and fails on an entry whose vector now agrees.",
+  "encode": {
+    "datetime/int64-max": {
+      "verdict": "deliberate",
+      "node": "the Extended JSON writer (the only way to write a type the driver has no value for) builds an Invalid Date and writes int64 0",
+      "corpus": "ffffffffffffff7f",
+      "reason": "a datetime beyond the Date range is refused on read and an Invalid Date is refused on write, so the driver never writes the epoch in its place"
+    },
+    "datetime/int64-min": {
+      "verdict": "deliberate",
+      "node": "the writer builds an Invalid Date and writes int64 0",
+      "corpus": "0000000000000080",
+      "reason": "same as datetime/int64-max"
+    },
+    "undefined/undefined": {
+      "verdict": "deliberate",
+      "node": "the writer turns {\"$undefined\": true} into a null (type 0a, 080000000a610000)",
+      "corpus": "type 06 (0800000006610000)",
+      "reason": "the driver refuses a BSON undefined on read (UnreadableValueError) and has no JavaScript value that writes one"
+    },
+    "dbpointer/typical": {
+      "verdict": "deliberate",
+      "node": "the writer turns $dbPointer into an embedded document {$ref, $id, $db} (type 03, 57 bytes)",
+      "corpus": "type 0c, 32 bytes",
+      "reason": "a genuine dbPointer is refused on read (UnreadableValueError); the driver cannot write one"
+    },
+    "document/every-type": {
+      "verdict": "deliberate",
+      "node": "369 bytes written",
+      "corpus": "353 bytes",
+      "reason": "the document holds an undefined and a dbPointer element, both listed above"
+    }
+  },
+  "encode-roundtrip": {
+    "datetime/int64-max": {
+      "verdict": "deliberate",
+      "node": "refused on read (UnreadableValueError, field a)",
+      "corpus": "the bytes read and written back unchanged",
+      "reason": "a datetime beyond the JavaScript Date range (8.64e15 ms either way) has no Date: the driver refuses to read it (UnreadableValueError) rather than build an Invalid Date and write int64 0 in its place"
+    },
+    "datetime/int64-min": {
+      "verdict": "deliberate",
+      "node": "refused on read (UnreadableValueError, field a)",
+      "corpus": "the bytes read and written back unchanged",
+      "reason": "a datetime beyond the JavaScript Date range (8.64e15 ms either way) has no Date: the driver refuses to read it (UnreadableValueError) rather than build an Invalid Date and write int64 0 in its place"
+    },
+    "symbol/typical": {
+      "verdict": "acceptable",
+      "node": "a symbol (type 0e) reads as a JavaScript string and is written back as a string (type 02)",
+      "corpus": "type 0e kept",
+      "reason": "README, BSON values: a symbol is deprecated in BSON, the value is kept, only its type byte changes"
+    },
+    "undefined/undefined": {
+      "verdict": "deliberate",
+      "node": "refused on read (UnreadableValueError, field a)",
+      "corpus": "the bytes read and written back unchanged",
+      "reason": "refused rather than read as JavaScript undefined and dropped on write"
+    },
+    "dbpointer/typical": {
+      "verdict": "deliberate",
+      "node": "refused on read (UnreadableValueError, field a)",
+      "corpus": "the bytes read and written back unchanged",
+      "reason": "a dbPointer reads as an embedded document the driver cannot tell from a real one by value, so it is refused rather than written back as another type"
+    },
+    "array/mixed": {
+      "verdict": "acceptable",
+      "node": "the double 3.0 reads as the number 3 and is written back as an int32 (61 bytes, 65 expected)",
+      "corpus": "double kept",
+      "reason": "README, BSON values: JavaScript has one number type; the value is unchanged, only int32 or double differs"
+    },
+    "document/every-type": {
+      "verdict": "deliberate",
+      "node": "refused on read at the undefined element",
+      "corpus": "the bytes read and written back unchanged",
+      "reason": "holds an undefined (see undefined/undefined) and a dbPointer (see dbpointer/typical)"
+    }
+  },
+  "decode": {
+    "decode/duplicate-keys": {
+      "verdict": "acceptable",
+      "node": "the decoded values (a: 3, b: 2) write back as 19 bytes",
+      "corpus": "26 bytes with the key a twice (reencodes_identically is true for an ordered decoder)",
+      "reason": "a JavaScript object cannot hold a repeated key; the last value wins, as the corpus says a mapping decoder must do"
+    },
+    "decode/regex-options-unsorted": {
+      "verdict": "acceptable",
+      "node": "the regex options \"xi\" read, and are written back, as \"ix\"",
+      "corpus": "options kept as written",
+      "reason": "the library stores regex options sorted; the pattern and the set of options are unchanged"
+    }
+  },
+  "reject": {
+    "reject/key-invalid-utf8": {
+      "verdict": "acceptable",
+      "node": "the key holding 0xff is read (as U+FFFD); only a string value is UTF-8 checked",
+      "corpus": "ProtocolError",
+      "reason": "invalid UTF-8 is accepted for the first release (the server accepts it too); a UTF-8 check is a post-release item; this replay fails if the Node codec starts refusing it"
+    }
+  },
+  "encode_refuse": {},
+  "datetime_floor": {},
+  "size": {}
+}

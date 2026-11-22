@@ -1,0 +1,4 @@
+ada has 2 purchases; bob has 0
+ada buys first book
+friend since 2020
+no such friend NOT_FOUND

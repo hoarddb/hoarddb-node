@@ -1,0 +1,5 @@
+peek 1
+pop two at once 1, 2
+pop 3
+pop 4
+empty pop is []

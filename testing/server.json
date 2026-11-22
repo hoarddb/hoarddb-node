@@ -1,0 +1,24 @@
+{
+  "tag": "test-server-fbd5f302f758",
+  "server_commit": "fbd5f302f7586ee1af8cbdf49679a8c24f1f3b7d",
+  "assets": {
+    "linux-amd64": {
+      "name": "hoardDB-server-linux-amd64",
+      "sha256": "889340d6a27feff998e6ee7f1427a13047e0f7aa4c3b522f2bfecc2437f2bfde"
+    },
+    "linux-arm64": {
+      "name": "hoardDB-server-linux-arm64",
+      "sha256": "8d8cfb46686a3d2dbf1988cdf97b903142cb906c71d6b032936c77fb6b77b926"
+    }
+  },
+  "cli_assets": {
+    "linux-amd64": {
+      "name": "hoarddb-linux-amd64",
+      "sha256": "1b44492474d623abf41a7f5c0487f795331fd497d1265254a21fa757ac8212db"
+    },
+    "linux-arm64": {
+      "name": "hoarddb-linux-arm64",
+      "sha256": "b04bbb8b1746003c5094b34b8b40d4454d40a5354aef28299a8a2366d3b7bbc0"
+    }
+  }
+}

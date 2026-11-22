@@ -1,0 +1,4 @@
+pop write docs
+pop fix bug
+pop no priority given
+empty pop is []

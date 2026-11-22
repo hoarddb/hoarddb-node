@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "ESNext.Disposable"], "module": "NodeNext", "moduleResolution": "NodeNext",
+    "strict": true, "noUncheckedIndexedAccess": true, "noImplicitOverride": true,
+    "noUnusedLocals": true, "noUnusedParameters": true, "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true, "isolatedModules": true, "skipLibCheck": true,
+    "types": ["node"], "noEmit": true
+  },
+  "include": ["src", "test/unit", "test/server", "test/helpers"]
+}

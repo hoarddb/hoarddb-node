@@ -1,0 +1,3 @@
+NOT_FOUND
+bucket not found: bucket "missing" not found in database "example_errors". Run 'show buckets in example_errors' to list what exists, or 'create bucket missing in example_errors { type: hash }' to create it
+that email is taken
