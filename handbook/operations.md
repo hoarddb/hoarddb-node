@@ -13,8 +13,9 @@ by the server, and the driver passes that refusal through.
 
 | Driver verb | Opcode sent | fifo | lifo | hash | btree | heap | blob |
 |---|---|---|---|---|---|---|---|
-| put (keyed write, replaces) | `PUT` 10 | yes | yes | yes | yes | yes | yes |
-| insert (keyless write, the server assigns the key) | `PUT` 10 with an empty `key` | yes | yes | yes | yes | yes | yes |
+| put (keyed write; on hash and btree a new document only, see the notes for the other types) | `PUT` 10 | yes | yes | yes | yes | yes | - |
+| upsert (keyed write, replaces or creates) | `UPSERT` 16 | - | - | yes | yes | - | - |
+| insert (keyless write, the server assigns the key) | `PUT` 10 with an empty `key` | yes | yes | yes | yes | yes | - |
 | insert many | `BATCH_PUT` 20 | yes | yes | yes | yes | yes | - |
 | get | `GET` 11 | - | - | yes | yes | - | yes |
 | exists | `EXISTS` 14 | - | - | yes | yes | - | yes |
@@ -61,17 +62,29 @@ Notes:
   `priority`; entries of equal priority come out in entry-id order (the two verbs always agree on it).
   A push with no `priority` is filed at 0, so an element inserted into a heap, or pushed without a
   priority, sits at 0: it comes out after every positive priority and before every negative one.
-- **`PUT` / insert on a blob stores the document as the payload.** The document is marshalled to BSON
-  and stored as the blob's bytes under the key (`key`, else the document's `_id_`, else a minted id), with
-  no metadata. `BLOB_WRITE` is the verb for binary data: it carries the raw bytes and a `metadata`
-  document, and answers `blobid` and `size`. A blob written by `PUT` reads back with `BLOB_READ` as the
-  BSON bytes of the document.
+- **On a hash or btree, `PUT` and insert never replace.** A key (or a document `_id_`) the bucket already
+  holds is refused with an `ERROR` frame, `DOCUMENT_EXISTS` (`0x12`), `write_outcome: not_applied`, and
+  the held document is left as it was; a `BATCH_PUT` that names a held `_id_`, or one `_id_` twice, is
+  refused whole the same way. **`UPSERT` is the replacing form**: it carries `PUT`'s members with a
+  required `key`, replaces the fields of the document under the key (a field the new document lacks is
+  gone), keeps the document's store fields, creates the document when there is none, and answers
+  `UPSERT_OK`. A bucket with no key to replace by (fifo, lifo, heap, blob) refuses it as the wrong-type
+  `ERROR` frame. An insert whose answer was lost may have been stored: read it back, or send it again as
+  an upsert, never as a second insert.
+- **On a fifo, lifo or heap, a held `_id_` is not refused, and the three do not agree.** A `PUT`, an insert,
+  a `BATCH_PUT` or a push that names an `_id_` a fifo or lifo already holds **adds another entry** with that
+  `_id_`: the queue then holds two. On a heap an entry is one `_id_` at one priority, so the same write
+  **silently replaces** the entry that holds the `_id_` at that priority (`PUT` and insert file at priority
+  0), and the same `_id_` at another priority is another entry. Neither answers `DOCUMENT_EXISTS`. A write
+  with no `_id_` gets a minted one and is always a new entry.
+- **`PUT` / insert on a blob is refused**, as the wrong-type `ERROR` frame. `BLOB_WRITE` is the verb that
+  writes a blob: it carries the raw bytes and a `metadata` document, and answers `blobid` and `size`.
 - **`push` on a hash or btree is a keyed put**: the document is stored under its `_id_`, or a minted id
   when it has none, and the answer is the push response (`id`). `pop` and `peek` on a hash or btree are
   still refused, each as the wrong-type `ERROR` frame whose message says why (pop: `pop is not defined for hash buckets: a hash has no order to take from, so there is no "next" to remove. Remove one with delete("<key>"), or read them with get("<key>") or find().`; btree and blob say their own type), because
   there is no order to take from.
 - **`get` and `exists` on a blob answer.** `exists` is true for a stored key. `get` answers `found: true`
-  with the stored document when the payload is BSON (as a `PUT` to a blob writes it), or else a
+  with the stored document when the payload is BSON, or else a
   synthesised document `{_id_, blob_id, size, ...metadata}` that carries no payload bytes. `BLOB_READ`
   is the verb for the payload; the CLI's `db.<blob>.get("<key>")` sends `BLOB_READ`, and
   `db.<blob>.info("<key>")` shows the metadata.
@@ -99,6 +112,7 @@ Notes:
 | Operation | Request | Success response |
 |---|---|---|
 | put / insert | `database, bucket, key, data, writeconcern` | `id, success, message, seq` † |
+| upsert | `database, bucket, key, data, writeconcern` | `id, success, message, seq` † (opcode `UPSERT_OK`) |
 | insert many | `database, bucket, data[], writeconcern` | `ids[], count, success, message` † |
 | push | `database, bucket, data, priority (heap: optional, 0 when omitted), writeconcern` | `id, success, message, seq` † |
 | pop | `database, bucket, limit?, writeconcern` | `found, items?, pending?, dead?, returned?, message` † (a pop consumes, so it is a write) |
@@ -155,8 +169,8 @@ Notes:
 ### Leases and the dead list
 
 `claim`, `ack`, `release`, `extend`, `dead`, `requeue` and `discard` work on a fifo, lifo or heap
-bucket. A store field is `pop`-only in v1.0: these verbs are refused on one. The limits are the store's
-own (`store/delivery_records.go`): `limit` 1–100 (0 means 1), `lease_ms` 1,000–3,600,000 (0 means
+bucket. A store field is `pop`-only: these verbs are refused on one. The limits are the store's
+own: `limit` 1–100 (0 means 1), `lease_ms` 1,000–3,600,000 (0 means
 30,000), an ack names at most 100 `item_ids`, `dead`'s `limit` is 1–1,000 (0 means 10), and one
 requeue or discard considers at most 100 entries, refused ones included. A heap requeue refuses an entry whose
 key a live element holds and leaves it at the head, so an `all` loop that sees a request move nothing while it named
@@ -294,7 +308,7 @@ refusal it has not already seen.
   buckets it approaches the frame limit. A driver documents it as an operator call.
 - `list nodes`' `addr` is each node's **cluster** address, not its driver port: a driver never dials it.
 - `bucket info` answers the one bucket's row of `list buckets` without counting any store: it costs the
-  same whether a store field holds ten elements or ten million, so use it (not `bucket stats`) to learn
+  same however many elements a store field holds, so use it (not `bucket stats`) to learn
   which store fields a bucket declares. A missing bucket or database is `NOT_FOUND`, as for `bucket stats`,
   and it needs the same read permission. Its `entries` is the bucket's own document count, not its stores'
   elements (only `bucket stats` counts those).
@@ -384,6 +398,11 @@ Every field verb takes `FieldRequest`:
   `INVALID_ARGUMENT` on a read too, with no `write_outcome` (a write's carries `not_applied`).
 
 ## 6. On a cluster
+
+**On a v1.1.0 server this section does not apply.** It describes the earlier engine's replicated mode,
+which a v1.1.0 server refuses to start in. There, each node answers this driver's opcodes from its own
+local store: a write stays on the node that took it, nothing is forwarded or copied, and a request for a
+replication factor above 1 is refused (`README.md`, "Read this first").
 
 - **A driver talks to any node.** It does not route by the ring, and keeps no per-bucket routing state.
 - **Writes** reaching a node that is not the bucket's owner are forwarded to the owner.

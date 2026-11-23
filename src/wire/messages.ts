@@ -80,6 +80,7 @@ const DEAD_MOVE_ANSWER = [
 export const REQUEST_FIELDS: Readonly<Partial<Record<OpName, readonly string[]>>> = Object.freeze({
   AUTH: ['username', 'password', 'protocol_version', 'capabilities', 'client', 'token'],
   PUT: ['database', 'bucket', 'key', 'data', 'writeconcern'],
+  UPSERT: ['database', 'bucket', 'key', 'data', 'writeconcern'],
   BTREE_INSERT: ['database', 'bucket', 'key', 'data', 'writeconcern'],
   GET: ['database', 'bucket', 'key'],
   BTREE_LOOKUP: ['database', 'bucket', 'key'],
@@ -110,6 +111,9 @@ export const REQUEST_FIELDS: Readonly<Partial<Record<OpName, readonly string[]>>
     'options',
     'encrypted',
     'replication_factor',
+    // On the wire and never sent by this driver: it has no option that sets them.
+    'part',
+    'part_of',
   ],
   DELETE_BUCKET: ['database', 'name'],
   LIST_BUCKETS: ['database'],
@@ -183,6 +187,15 @@ export const RESPONSE_FIELDS: Readonly<Partial<Record<OpName, readonly string[]>
     'password_min_length',
   ],
   PUT: [
+    'id',
+    'success',
+    'message',
+    'seq',
+    'copies_confirmed',
+    'replication_factor',
+    'write_outcome',
+  ],
+  UPSERT: [
     'id',
     'success',
     'message',
@@ -291,7 +304,7 @@ export const RESPONSE_FIELDS: Readonly<Partial<Record<OpName, readonly string[]>
   BLOB_READ: ['found', 'blobid', 'data', 'size', 'metadata', 'message'],
   CREATE_DB: ['success', 'message'],
   DELETE_DB: ['success', 'message'],
-  CREATE_BUCKET: ['success', 'message'],
+  CREATE_BUCKET: ['success', 'message', 'placement'],
   DELETE_BUCKET: ['success', 'message'],
   LIST_BUCKETS: ['found', 'database', 'buckets', 'message', 'encrypted'],
   LIST_DATABASES: ['databases', 'message'],
@@ -408,6 +421,7 @@ const NAME_KINDS: Readonly<Record<string, FieldKind>> = Object.freeze({
   // carry both, and the document names only the string).
   version: 'stringOrInteger',
   message: 'string',
+  placement: 'string',
   id: 'string',
   key: 'string',
   blobid: 'string',

@@ -1,4 +1,6 @@
 got ada Ada 36
+second put is DOCUMENT_EXISTS not_applied
+upserted Grace Hopper
 updated ada Ada 37 3 maths,poetry
 missing is NOT_FOUND
 found Ada

@@ -142,3 +142,12 @@ test('get with consistent: true sends CONSISTENT_GET', async () => {
   assertSentAs(sent[0], vector);
   assert.equal(found?.Name, 'Ada');
 });
+
+test('upsert sends UPSERT and replaces', async () => {
+  const vector = vectorNamed('upsert of an existing id on a hash bucket replaces it');
+  const { client, sent } = recordingClient(answerTo(vector));
+  const written = await client.database('v281').hash('users').upsert('ada', { Born: 1815, Name: 'Ada Lovelace' });
+  assertSentAs(sent[0], vector);
+  assert.equal(sent[0]?.op, 'UPSERT');
+  assert.equal(written.id, 'ada');
+});

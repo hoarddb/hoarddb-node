@@ -1,17 +1,51 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # hoarddb
 
-The Node.js driver for hoardDB, a database of many small buckets, each of one of six store types (hash,
-btree, fifo, lifo, heap and blob). It speaks hoardDB's own protocol over TLS, pins the server's key, and
+The Node.js driver for hoardDB. It speaks hoardDB's own protocol over TLS, pins the server's key, and
 is written in TypeScript with one runtime dependency (the codec that reads and writes the wire format).
+
+**Status: pre-release (0.1.0), and it does not speak the ring protocol yet.** Read the next section before
+you build on it.
+
+## What this driver reaches on a v1.1 server
+
+A hoardDB v1.1 server is a ring server: a bucket declares fields, and a field can be a store (a queue, a
+table, a heap) that every document carries for itself. The `hoarddb` command line, `hoarddb dump` and
+`hoarddb restore` work on that data.
+
+This driver was written before the ring. It sends the opcodes of the server's earlier single-store engine,
+in which a bucket has one of six store types (hash, btree, fifo, lifo, heap and blob). Against a v1.1.0
+server:
+
+- **It works.** It connects, logs in with the same users, and reads and writes: the server still answers
+  these opcodes. The five-minute path below and `examples/hash.mjs` were run against a v1.1.0 server.
+- **On a hash or btree bucket `put` inserts and never replaces.** A `put` of a key that already holds a
+  document is refused with `DocumentExistsError` (`code` `DOCUMENT_EXISTS`), and nothing is written
+  (`writeOutcome` is `not_applied`). `upsert(key, doc)` replaces the document or creates it, and
+  `update(key, ops)` changes some of its fields. The blocks below store their sample documents with
+  `upsert`, so each runs any number of times.
+- **The other store types do not refuse a `put` of a held key.** Through an untyped handle
+  (`database.bucket(name)`), a `put` on a fifo or lifo bucket adds another entry with the same `_id_`, and
+  a `put` on a heap bucket silently replaces the entry that holds that `_id_` at priority 0. Neither is an
+  error. Use `push` on those types; `upsert` is refused on them, and a blob bucket refuses `put`.
+- **Its data is separate.** Its databases and buckets live in the earlier engine's own store. Nothing it
+  creates is visible to the `hoarddb` command line or to a ring client, nothing created there is visible to
+  it, and `hoarddb dump` does not include it. A database named `app` can exist on both sides, and they are
+  two different databases.
+- **Its data is on one node.** A v1.1.0 server refuses to start in the earlier engine's replicated mode, so
+  on a cluster each node answers these opcodes from its own local store: a write through this driver stays
+  on the node that took it and is not copied to the others. `alterBucket` to a replication factor above 1
+  is refused, and every `writeConcern` level behaves the same.
+- **There is no ring client for Node.js yet.** The Go module `github.com/hoarddb/hoarddb-go` has one, in
+  its package `ring`.
 
 ## Install
 
-**Status: pre-release.** The package is not published to npm: `package.json` is `"private": true`, so
+The package is not published to npm: `package.json` is `"private": true`, so
 `npm install hoarddb` does not work. Build a tarball from a clone of this repository and install that:
 
 ```bash
-git clone git@github.com:hoarddb/hoarddb-node.git
+git clone https://github.com/hoarddb/hoarddb-node.git
 cd hoarddb-node
 npm ci          # the pinned toolchain
 npm run build   # dist/: the ES module and CommonJS builds (npm pack also runs it, as prepack)
@@ -36,11 +70,12 @@ HOARDDB_ROOT_PASSWORD=<the server password> node examples/hash.mjs
 
 ## The five-minute path
 
-Start a server with a password, and copy the fingerprint from its `TCP driver listener listening` log
-line:
+Build `hoarddb-server` from [`github.com/hoarddb/hoarddb-server`](https://github.com/hoarddb/hoarddb-server)
+(no release binary is published yet). Start it with a password, and copy the fingerprint from its
+`TCP driver listener listening` log line:
 
 ```bash
-HOARDDB_ROOT_PASSWORD=choose-a-long-password hoardDB-server
+HOARDDB_ROOT_PASSWORD=choose-a-long-password hoarddb-server
 # ... "msg":"TCP driver listener listening","address":"127.0.0.1:7433","fingerprint":"SHA256:79bb6170..."
 ```
 
@@ -54,8 +89,10 @@ try {
   await client.createDatabase('app', { ifNotExists: true });
   const users = await client.database('app').createBucket('users', 'hash', { ifNotExists: true });
 
-  await users.put('ada', { name: 'Ada', age: 36 });
-  console.log(await users.get('ada')); // { name: 'Ada', age: 36, _id_: 'ada' }
+  // upsert stores the document or replaces it, so this program runs any number of times.
+  // put stores a new document only: on a key that is already there it throws DocumentExistsError.
+  await users.upsert('ada', { name: 'Ada', age: 36 });
+  console.log(await users.get('ada')); // { _id_: 'ada', age: 36, name: 'Ada' }
   for await (const user of users.find({ age: { $gte: 30 } })) console.log(user.name);
 } finally {
   await client.close();
@@ -72,7 +109,7 @@ async function main() {
   try {
     await client.createDatabase('app', { ifNotExists: true });
     const users = await client.database('app').createBucket('users', 'hash', { ifNotExists: true });
-    await users.put('ada', { name: 'Ada', age: 36 });
+    await users.upsert('ada', { name: 'Ada', age: 36 });
     console.log(await users.get('ada'));
   } finally {
     await client.close();
@@ -93,7 +130,7 @@ interface User {
 
 const client = await connect();
 const users = client.database('app').hash<User>('users');
-await users.put('ada', { name: 'Ada', age: 36 });
+await users.upsert('ada', { name: 'Ada', age: 36 });
 const ada = await users.get('ada'); // Stored<User>; a missing key throws NotFoundError
 console.log(ada.name);
 // @ts-expect-error nmae is not a field of User, so this line does not compile
@@ -139,8 +176,8 @@ failure (`TLS_KEY_CHANGED`), never a prompt.
 ## The six store types
 
 A bucket has one type, chosen when it is created. Every verb is on the type that answers it, and the
-compiler refuses the others. Every write takes `{ writeConcern: 'one' | 'majority' | 'all' }` (on a cluster),
-and every call takes `{ signal, timeoutMs }`. A verb that returns a list (`pop`, `peek`, `claim`, `deadList`) answers
+compiler refuses the others. Every write takes `{ writeConcern: 'one' | 'majority' | 'all' }` (against a
+v1.1.0 server a bucket of this driver has one copy, so the levels behave the same), and every call takes `{ signal, timeoutMs }`. A verb that returns a list (`pop`, `peek`, `claim`, `deadList`) answers
 `[]` when there is nothing and never throws for emptiness. A verb that returns one value (`get`, `findOne`,
 `update`, btree `first` and `last`, `getBlob`, and a store field's `get` and `getBlob`) throws `NotFoundError`
 (`err.code === 'NOT_FOUND'`) on a miss, so a miss and a stored `null` are never confused. Deleting a missing
@@ -148,8 +185,8 @@ key is `false`, not an error.
 
 ### hash
 
-Keyed documents with secondary indexes. `put`, `insert` (the server assigns the key), `insertMany`, `get`
-(`{ consistent: true }` reads from a quorum), `exists`, `delete`, `update`, `count`, `find`, `findOne`,
+Keyed documents with secondary indexes. `put`, `upsert`, `insert` (the server assigns the key), `insertMany`, `get`
+(`{ consistent: true }` asks for a quorum read; with one copy it is an ordinary read), `exists`, `delete`, `update`, `count`, `find`, `findOne`,
 `distinct` and `search`.
 
 ```ts
@@ -160,10 +197,37 @@ const people = await client.database('app').createBucket('people', 'hash', {
   ifNotExists: true,
   indexes: [{ fields: ['city'] }],
 });
-await people.put('ada', { name: 'Ada', city: 'London' });
+await people.upsert('ada', { name: 'Ada', city: 'London' });
 const { id } = await people.insert({ name: 'Grace', city: 'New York' });
 console.log(id, await people.exists('ada'), await people.count());
 for await (const person of people.search({ city: 'London' })) console.log(person.name);
+await client.close();
+```
+
+On a hash or btree bucket, `put(key, doc)` stores a new document and never replaces one: a key that already holds a document is
+`DocumentExistsError` (`DOCUMENT_EXISTS`), nothing is written, and the error's `hint` names the two calls
+that do change a stored document. `upsert(key, doc)` replaces the document under the key, or creates it:
+a field the new document lacks is gone, and the document's store fields are kept. `update(key, ops)`
+changes some fields and leaves the rest. `insert` and `insertMany` are refused the same way for a
+`_id_` that is already held, and `insertMany` is refused whole. An `upsert` is never resent after a lost
+answer, because a resend would overwrite a write that landed in between: read the document back first.
+This refusal is the hash and btree buckets' only: a fifo or lifo bucket takes a second entry with the same
+`_id_`, and a heap bucket replaces the entry that holds the `_id_` at the same priority (see the top of this
+file).
+
+```ts
+import { connect, DocumentExistsError } from 'hoarddb';
+
+const client = await connect();
+const people = await client.database('app').createBucket('people', 'hash', { ifNotExists: true });
+await people.upsert('grace', { name: 'Grace', city: 'New York' });
+try {
+  await people.put('grace', { name: 'Grace Hopper' });
+} catch (err) {
+  if (!(err instanceof DocumentExistsError)) throw err;
+  console.log(err.code, err.writeOutcome); // DOCUMENT_EXISTS not_applied
+  await people.upsert('grace', { name: 'Grace Hopper', city: 'Arlington' });
+}
 await client.close();
 ```
 
@@ -180,7 +244,7 @@ import { connect } from 'hoarddb';
 
 const client = await connect();
 const scores = await client.database('app').createBucket('scores', 'btree', { ifNotExists: true });
-await scores.put('alice', { points: 9 });
+await scores.upsert('alice', { points: 9 });
 for await (const entry of scores.range({ gte: 'a', lte: 'm' })) console.log(entry.key, entry.value.points);
 console.log((await scores.first()).key, (await scores.last()).key);
 await client.close();
@@ -335,7 +399,7 @@ import { connect } from 'hoarddb';
 
 const client = await connect();
 const users = await client.database('app').createBucket('users', 'hash', { ifNotExists: true });
-await users.put('ada', { name: 'Ada', visits: 1, tags: ['maths'] });
+await users.upsert('ada', { name: 'Ada', visits: 1, tags: ['maths'] });
 const updated = await users.update('ada', { $set: { city: 'London' }, $inc: { visits: 2 }, $push: { tags: 'poetry' } });
 console.log(updated);
 await client.close();
@@ -347,15 +411,11 @@ refused locally with `INVALID_ARGUMENT` and nothing is sent. Keys may be paths: 
 
 ## Copies of a bucket
 
-On a cluster, `database.alterBucket(name, { replicationFactor })` raises or lowers how many copies of a
-bucket are kept. It needs the `bucket_rf` capability (`UnsupportedFeatureError`, nothing sent, without it)
-and a whole number of at least 1. The answer comes when the bucket's owner has recorded the change;
-`pending` names the members that will copy the bucket by themselves and `releasing` the members whose
-copies are deleted once the others hold everything they hold. A refusal an operator must act on, such as
-a factor larger than the cluster, is `InvalidArgumentError` with the server's sentence (it names the
-fix) and is sent once. A refusal a retry clears is `UnavailableError` with `writeOutcome: 'not_applied'`
-and `retryable: true`; the driver resends it with backoff until the call's `timeoutMs` or `signal` ends
-the waiting. Runnable: `examples/alter.mjs`.
+`database.alterBucket(name, { replicationFactor })` asks for a bucket's replication factor to be raised or
+lowered. It needs the `bucket_rf` capability (`UnsupportedFeatureError`, nothing sent, without it) and a
+whole number of at least 1. A v1.1.0 server refuses a factor above 1 for this driver's buckets with
+`InvalidArgumentError`: the earlier engine runs on one node only (see "What this driver reaches on a v1.1
+server"). `examples/alter.mjs` shows the call and prints the refusal.
 
 ```ts
 import { connect } from 'hoarddb';
@@ -382,7 +442,7 @@ const users = await client.database('app').createBucket('User', 'hash', {
     { name: 'Friends', type: 'hash' },
   ],
 });
-await users.put('ada', { Name: 'Ada' });
+await users.upsert('ada', { Name: 'Ada' });
 const purchases = users.field('ada', 'Purchases');
 await purchases.push({ item: 'book' });
 console.log(await purchases.len(), (await purchases.pop())[0]?.element);
@@ -394,8 +454,8 @@ await client.close();
 of another store is reached with `.field(element, name)` again.
 
 `info()` is on every bucket handle, of any type. It asks the server what the bucket is declared as, in one
-round trip, and never walks a store, so it costs the same whether a store field holds ten elements or ten
-million (`stats()` counts them). Use it to learn which store fields a bucket has and what each one is:
+round trip, and never walks a store, so its cost does not grow with the number of elements a store field
+holds (`stats()` counts them). Use it to learn which store fields a bucket has and what each one is:
 
 ```ts
 import { connect, isHoardDBError } from 'hoarddb';
@@ -467,7 +527,8 @@ await client.close();
 The codes the server sends are `NOT_FOUND`, `ALREADY_EXISTS`, `PERMISSION_DENIED`, `INVALID_ARGUMENT`,
 `INTERNAL`, `UNAVAILABLE`, `TIMEOUT` (a write concern that timed out, the write is stored),
 `CONFLICT`, `QUOTA_EXCEEDED`, `UNSUPPORTED_VERSION`, `NOT_AUTHENTICATED`, `OVERLOADED`,
-`RESULT_TOO_LARGE`, `DUPLICATE_KEY`, `FIELD_TYPE` and `BATCH_TOO_LARGE`; a code newer than this driver is `UNKNOWN(<n>)`.
+`RESULT_TOO_LARGE`, `DUPLICATE_KEY`, `FIELD_TYPE`, `BATCH_TOO_LARGE` and `DOCUMENT_EXISTS` (a `put`, `insert` or
+`insertMany` of a key that already holds a document; see "hash"); a code newer than this driver is `UNKNOWN(<n>)`.
 A verb the bucket's store type does not answer (`range` on a hash, `update` on a queue, `search` on a blob) is `INVALID_ARGUMENT`, with a message that names the bucket, its type and the type the verb needs.
 `EARLY_DATA_REJECTED` is a retired code: the server never sends it, but the driver still decodes it. The driver's own are `CONNECTION_FAILED`, `TLS_UNTRUSTED`, `TLS_FINGERPRINT_MISMATCH`,
 `TLS_KEY_CHANGED`, `AUTH_FAILED` (with a `reason`), `PROTOCOL_ERROR`, `REQUEST_TIMEOUT`, `ABORTED`,
@@ -500,7 +561,7 @@ server stamped an outcome. A stamped `not_applied` is still resent.
 `NOT_AUTHENTICATED` is retried once on a new connection for a read. A wrong password, a rate limit, a refused key and every local
 error are never retried. `BATCH_TOO_LARGE` is never retried as sent: on a standalone node (`not_applied`) `insertMany` halves the
 batch and resends each half automatically, as it always has for the old in-band refusal, down to one document, whose refusal is the
-caller's; a cluster owner's `unknown` refusal is never split, because a member may have applied it, so it goes to the caller, who
+caller's; a refusal stamped `unknown` is never split, because it may have been applied, so it goes to the caller, who
 reads back first. Backoff is full jitter, up to 5 seconds, and never past the call's deadline.
 
 ## BSON values
@@ -550,9 +611,9 @@ that holds `$ref` and `$id` is data, not a dbPointer, and comes back as the plai
 Before 1.0 a change is made directly and recorded in `CHANGELOG.md`. The latest: `pop()` returns a list and
 takes `limit` (see "fifo and lifo"); `const [job] = await queue.pop()` replaces `const job = await queue.pop()`.
 
-## What is not in version 1
+## What this driver does not do
 
-User administration, query pipelining, multi-document updates (`filter`, `multi`) and `upsert`, the `$pull`
+The ring protocol (see the top of this file), user administration, query pipelining, multi-document updates (`filter`, `multi`), a batch upsert (`upsert` takes one document), the `$pull`
 operator, SRV connection strings, and reading an authentication token from the environment.
 
 ## Testing
@@ -563,18 +624,34 @@ tests; it needs no server, and prints the test count when it finishes. `npm run 
 `scripts/compliance-check.sh` checks the licences, the dependency set, the import boundary, banned names
 and private references.
 
-`npm run test:server` (the frozen vectors replayed against a real server, the cluster, and every file in
-`examples/`; it prints its own count) needs a `hoardDB-server` binary and the built package, so run
+`npm run test:server` (the frozen vectors replayed against a real server, the cluster tests, and every file
+in `examples/`; it prints its own count) needs a `hoarddb-server` binary and the built package, so run
 `npm run build` first. The tests take the binary from the `HOARDDB_SERVER_BIN` environment variable:
 
 ```bash
 npm run build
-export HOARDDB_SERVER_BIN=/path/to/hoardDB-server   # a binary you built from the hoardDB server repository
+export HOARDDB_SERVER_BIN=/path/to/hoarddb-server   # a binary you built from the hoardDB server repository
 npm run test:server
 ```
 
-A test-server download (`scripts/fetch-server.sh`) is not available yet: no test-server release is published,
-so build the binary yourself.
+Build that binary from tag `v1.1.0` of the server repository to repeat the run below. The vectors under
+`testdata/driver-vectors/` name, in `server_commit`, the server they were captured from.
+
+**What was run against v1.1.0.** `npm run test:server` against a server built from tag `v1.1.0`: 129 of its
+138 tests pass. The nine that do not are not driver failures:
+
+- **Eight are the whole cluster test file, `test/server/cluster.test.ts`.** It starts three nodes in the
+  earlier engine's replicated mode, and a v1.1.0 server refuses to start in that mode, so these tests cannot
+  run against v1.1.0 at all. Nothing in this driver was tested against a v1.1.0 cluster.
+- **One is a replayed vector, "user drop of the last administrator".** v1.1.0 refuses the request, as the
+  vector records, with the same code, but its sentence is worded differently from the recorded one. The replay
+  sent 267 vectors and the other 266 answered as recorded.
+
+Every file in `examples/` and both quick starts above were also run twice in a row against that server.
+
+`testing/server.json` is the manifest of a test-server download (`scripts/fetch-server.sh`). No test-server
+release is published, the file says so, and the server it names is older than v1.1.0 and than the vectors: it
+is not what the tests are run against. Build the binary yourself and pass it in `HOARDDB_SERVER_BIN`.
 
 ### Conformance with the shared BSON corpus
 
@@ -599,14 +676,16 @@ A key holding NUL and a value nested past 100 levels are refused before anything
 
 ## Contributing
 
-`handbook/` and `testdata/` are the same in every driver repository and are not edited here: if one is
-wrong, open an issue that says what you read and what you observed. Pull requests to the code are welcome.
+`handbook/` and `testdata/` describe the earlier engine's protocol, the one this driver sends, and are not
+edited here: if one is wrong, open an issue that says what you read and what you observed. The ring
+protocol is described in the handbook of the `hoarddb-go` repository. Pull requests to the code are welcome.
 
 ## Compatibility
 
-| Driver | Tested against server commit |
-|---|---|
-| 0.1.0 | `952af178553722443eda4b99e554b617590689fb` |
+| Driver | Server | What was run |
+|---|---|---|
+| 0.1.0 | hoardDB v1.1.0, one node, the earlier engine's store only | both quick starts and every file in `examples/`, each twice in a row |
+| 0.1.0 | hoardDB v1.1.0, one node, the earlier engine's store only | `npm run test:server`: 129 of 138 pass; the cluster test file cannot start on v1.1.0 and one replayed vector's wording differs (see "Testing") |
 
 ## Licence
 

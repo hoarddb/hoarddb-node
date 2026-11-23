@@ -22,6 +22,7 @@ import {
   ConfigError,
   ConflictError,
   ConnectionError,
+  DocumentExistsError,
   DuplicateKeyError,
   FieldTypeError,
   FrameTooLargeError,
@@ -338,4 +339,28 @@ test('RESULT_TOO_LARGE without retained_bytes reports 0, not undefined', () => {
   const notFound = errorFromErrorPayload(encodeDocument({ code: 1, message: 'bucket not found' }), CTX);
   assert.equal(notFound instanceof ResultTooLargeError, false);
   assert.equal((notFound as { retainedBytes?: number }).retainedBytes, undefined);
+});
+
+test('a document-exists refusal is typed', () => {
+  // Wire code 0x12: a put, insert or insertMany named a key that holds a document. The bytes are the
+  // server's own, from the frozen vector.
+  const vector = vectorNamed('insert of an existing id is refused') as ErrorExchange;
+  assert.equal(vector.response.opcode_name, 'ERROR');
+  const error = errorFromErrorPayload(hexToBytes(vector.response.payload_hex), { operation: 'put', target: 'v297/users/ada', kind: 'write' });
+  assert.ok(error instanceof DocumentExistsError, `DocumentExistsError, got ${error.name}`);
+  assert.ok(!(error instanceof InternalError), 'a deliberate refusal is not an internal error');
+  assert.equal(error.code, 'DOCUMENT_EXISTS');
+  assert.equal(error.wireCode, 18);
+  assert.equal(error.writeOutcome, 'not_applied');
+  assert.equal(error.retryable, false);
+  // The server's sentence is kept byte for byte; the hint is in this driver's own call syntax.
+  assert.match(error.message, /^Document "ada" already exists in bucket "users" \(database "v297"\)\./);
+  assert.match(error.hint ?? '', /upsert\(key, doc\)/);
+  assert.match(error.hint ?? '', /update\(key, ops\)/);
+  assert.equal(keepsConnection(error, false), true, 'a known refusal keeps its connection');
+
+  // The same code with no vector behind it: any ERROR payload carrying 18.
+  const bare = errorFromErrorPayload(encodeDocument({ code: 18, message: 'm' }), CTX);
+  assert.ok(bare instanceof DocumentExistsError);
+  assert.equal(bare.code, 'DOCUMENT_EXISTS');
 });

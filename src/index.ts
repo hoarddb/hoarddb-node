@@ -18,6 +18,7 @@ export {
   ConflictError,
   ConnectionError,
   DeadMoveRefusedError,
+  DocumentExistsError,
   DuplicateKeyError,
   FieldTypeError,
   FrameTooLargeError,

@@ -102,6 +102,7 @@ error answer is `ERROR` (`0xA2`) in place of the success opcode. This table is t
 | `GET` | 11 | `GET_RESPONSE` 12 | find response |
 | `DELETE` | 13 | `DELETE` 13 | delete response |
 | `EXISTS` | 14 | `EXISTS_RESPONSE` 15 | `{exists}` |
+| `UPSERT` | 16 | `UPSERT_OK` 17 | insert response |
 | `BATCH_PUT` | 20 | `BATCH_PUT_OK` 21 | batch insert response |
 | `FIFO_PUSH` / `LIFO_PUSH` / `HEAP_PUSH` | 30 / 40 / 60 | same opcode | push response |
 | `FIFO_POP` / `LIFO_POP` / `HEAP_POP` | 31 / 41 / 61 | `FIFO_POP_RESPONSE` 32 / `LIFO_POP_RESPONSE` 42 / `HEAP_POP_RESPONSE` 62 | pop response (`found, items?, message`) |
@@ -161,7 +162,7 @@ All seven writes declare the cluster feature `queue_claim`: a write is refused b
 a gossiped member does not advertise it. `DEAD_LIST` declares nothing (it is a read).
 
 **Outside the application API** (a driver may expose them in a low-level layer; the vectors do not
-cover them in v1, except user administration, whose wire is vectored in the `users` group, `testing.md` section 1.2): `CLUSTER_ADD` 97, `MIGRATE` 98, `CLUSTER_REMOVE` 99 (operator triggers);
+cover them, except user administration, whose wire is vectored in the `users` group, `testing.md` section 1.2): `CLUSTER_ADD` 97, `MIGRATE` 98, `CLUSTER_REMOVE` 99 (operator triggers);
 `DUMP_START`/`DUMP_CHUNK`/`DUMP_DONE` A5–A7 and `RESTORE_START`/`RESTORE_CHUNK`/`RESTORE_DONE` A8–AA
 (backup, root only today); `USER_CREATE` … `USER_REVOKE` B5–BB (user administration: creating a user
 sends a client-derived Argon2id credential, never a plaintext password, so a driver that offers it
@@ -184,7 +185,7 @@ suggest (`PUT` on a queue pushes, `FIFO_PUSH` on a hash is a keyed put), and tha
 
 ## 5. `GET_FAST`: the compact read
 
-An optimisation of `GET` that skips BSON on the request. **Not part of the v1 public API**; a driver may
+An optimisation of `GET` that skips BSON on the request. **Not part of the public API**; a driver may
 use it internally when the server advertises `get_fast`.
 
 - Request payload (not BSON): `1-byte database length, database, 1-byte bucket length, bucket, 2-byte
@@ -210,7 +211,7 @@ read the fields when they are present (`errors.md`).
   admitted frame **concurrently**. With more than one request in flight, **neither response order nor
   execution order is guaranteed**. A client that writes too far ahead is not refused; the server stops
   reading and TCP backpressure slows it.
-- **v1 drivers are lockstep: one request in flight per connection**, and several connections in a pool.
+- **These drivers are lockstep: one request in flight per connection**, and several connections in a pool.
   It is provably correct and needs no ordering contract. A driver's connection is nonetheless built as a
   request-ID demultiplexer (a writer lock, one reader, a table of waiters by request ID) so that raising
   the in-flight limit later is a constant, not a rewrite.

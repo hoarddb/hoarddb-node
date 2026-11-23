@@ -642,8 +642,33 @@ export interface DocumentBucket<T extends object> extends BucketBase {
 }
 
 export interface KeyedBucket<T extends object> extends DocumentBucket<T> {
+  /**
+   * Stores `doc` under `key` as a new document. On a hash or btree bucket a key that already holds a document is refused with
+   * `DocumentExistsError` (`DOCUMENT_EXISTS`) and nothing is written (`writeOutcome` is `not_applied`):
+   * use `upsert` to replace the document, or `update` to change some of its fields. A key that is not a
+   * non-empty string is refused before anything is sent: `insert` is the verb that lets the server assign one.
+   * Through an untyped handle on another store type nothing is refused: a fifo or lifo bucket adds another
+   * entry with the same `_id_`, and a heap bucket replaces the entry that holds it at priority 0.
+   */
   put(key: string, doc: T, opts?: WriteOptions): Promise<WriteResult>;
+  /**
+   * Stores `doc` under `key`, replacing the document that is there and creating it when there is none.
+   * The replaced document's fields are replaced (a field `doc` lacks is gone) and its store fields are
+   * kept. A bucket with no key to replace (fifo, lifo, heap, blob) is refused with
+   * `InvalidArgumentError`, and a key that is not a non-empty string is refused before anything is sent.
+   *
+   * Never resent after a lost answer: the server cannot tell a resend from a new write, so a resend
+   * would overwrite an `update`, `upsert` or `delete` that landed meanwhile. The error says the outcome
+   * is unknown; read the document back before sending it again.
+   */
+  upsert(key: string, doc: T, opts?: WriteOptions): Promise<WriteResult>;
+  /** Stores `doc` under a key the server assigns (`result.id`). A `doc._id_` that is already held is `DocumentExistsError`. */
   insert(doc: T, opts?: WriteOptions): Promise<WriteResult>;
+  /**
+   * Stores every document, each under its `_id_` or a key the server assigns. An `_id_` the bucket
+   * holds, or one named twice in the batch, refuses the whole batch with `DocumentExistsError` and
+   * nothing is written.
+   */
   insertMany(docs: readonly (T & { _id_?: string })[], opts?: WriteOptions): Promise<BatchResult>;
   /** Throws `NotFoundError` on a miss, so a miss and a stored null are never confused. */
   get(key: string, opts?: ReadOptions): Promise<Stored<T>>;

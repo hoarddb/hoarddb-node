@@ -63,7 +63,7 @@ Default path `~/.hoarddb/known_servers`. The CLI, every driver, and the server f
 (`<data dir>/cluster/known_servers`) read and write the file by the four rules below: the canonical host
 form, the line grammar, file safety and saving. They are one contract for every driver.
 `testdata/trust-vectors/v1.json` holds them as data, generated from the Go implementation
-(`hoardDB/transport`; `testing.md` section 1.4), and a driver passes every vector in it.
+the server uses (`testing.md` section 1.4), and a driver passes every vector in it.
 
 ### 4.1 The canonical host form
 

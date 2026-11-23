@@ -50,7 +50,7 @@ test('the README names every store type and every error code of section 5', () =
   const codes = [
     'NOT_FOUND', 'ALREADY_EXISTS', 'PERMISSION_DENIED', 'INVALID_ARGUMENT', 'INTERNAL', 'UNAVAILABLE', 'TIMEOUT',
     'CONFLICT', 'QUOTA_EXCEEDED', 'UNSUPPORTED_VERSION', 'EARLY_DATA_REJECTED', 'NOT_AUTHENTICATED', 'OVERLOADED',
-    'RESULT_TOO_LARGE', 'DUPLICATE_KEY', 'FIELD_TYPE', 'BATCH_TOO_LARGE', 'CONNECTION_FAILED', 'TLS_UNTRUSTED', 'TLS_FINGERPRINT_MISMATCH',
+    'RESULT_TOO_LARGE', 'DUPLICATE_KEY', 'FIELD_TYPE', 'BATCH_TOO_LARGE', 'DOCUMENT_EXISTS', 'CONNECTION_FAILED', 'TLS_UNTRUSTED', 'TLS_FINGERPRINT_MISMATCH',
     'TLS_KEY_CHANGED', 'AUTH_FAILED', 'PROTOCOL_ERROR', 'REQUEST_TIMEOUT', 'ABORTED', 'CLIENT_CLOSED', 'POOL_TIMEOUT',
     'FRAME_TOO_LARGE', 'UNREADABLE_VALUE', 'INVALID_URI', 'INVALID_OPTIONS', 'UNSUPPORTED_FEATURE',
   ];
@@ -77,4 +77,32 @@ test('the README gives the install steps from a checkout and says nothing it sho
   assert.ok(!README.includes('a missing parent document is created'), '$set does not create the document itself');
   assert.ok(!/codes the server sends are[^.]*EARLY_DATA_REJECTED/.test(README), 'EARLY_DATA_REJECTED is never sent');
   assert.ok(README.includes('The outcome is unknown: read it back before resending'), 'the one exception to word for word is named');
+});
+
+test('the README says what the server tests were run against, and the manifest claims no release', () => {
+  assert.ok(!README.includes('have not been re-run against v1.1.0'), 'the server tests have been run against v1.1.0');
+  assert.ok(!/server commit named in `testing\/server\.json` \| `npm run test:server`/.test(README), 'the compatibility table names what test:server was run against');
+  assert.match(README, /\| 0\.1\.0 \| hoardDB v1\.1\.0[^|]*\| `npm run test:server`/, 'the compatibility table has a v1.1.0 row for test:server');
+  assert.ok(README.includes('test/server/cluster.test.ts'), 'the README names the test file that cannot run against v1.1.0');
+  assert.ok(README.includes('HOARDDB_SERVER_BIN'), 'the README says how the server tests take their binary');
+
+  // testing/server.json is read only by scripts/fetch-server.sh, for a download that does not exist yet:
+  // it must say so, and must not pass for the server the tests are run against.
+  const manifest = JSON.parse(readFileSync(join(process.cwd(), 'testing', 'server.json'), 'utf8')) as {
+    published?: boolean;
+    note?: string;
+  };
+  assert.equal(manifest.published, false, 'testing/server.json says no test-server release is published');
+  assert.match(manifest.note ?? '', /HOARDDB_SERVER_BIN/, 'testing/server.json says how to run the server tests meanwhile');
+});
+
+test('the README scopes "put never replaces" to hash and btree, and says what a queue and a heap do', () => {
+  assert.ok(!README.includes('**`put` inserts and never replaces.**'), 'the unscoped statement is false on fifo, lifo and heap');
+  assert.match(README, /\*\*On a hash or btree bucket `put` inserts and never replaces\.\*\*/);
+  assert.match(README, /fifo or lifo[^.]*adds another entry/, 'a queue takes a second entry with the same _id_');
+  assert.match(README, /heap[^.]*replaces the entry/, 'a heap replaces the entry that holds the _id_ at that priority');
+  const handbook = readFileSync(join(process.cwd(), 'handbook', 'operations.md'), 'utf8');
+  assert.ok(!handbook.includes('never replaces) | `PUT`'), 'the verb table does not say put never replaces on every type');
+  assert.ok(!handbook.includes('**`PUT` and insert never replace.**'), 'the note is scoped to hash and btree');
+  assert.match(handbook, /\*\*On a hash or btree, `PUT` and insert never replace\.\*\*/);
 });

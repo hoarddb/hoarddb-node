@@ -1,4 +1,6 @@
 {
+  "published": false,
+  "note": "No test-server release is published, so scripts/fetch-server.sh has nothing to download. The entries below describe the binary the server tests were first written against; it is older than hoardDB v1.1.0 and than the vectors under testdata/, and it is not what the tests are run against. Build hoarddb-server from tag v1.1.0 of the server repository and pass its path in HOARDDB_SERVER_BIN (see the README, \"Testing\").",
   "tag": "test-server-fbd5f302f758",
   "server_commit": "fbd5f302f7586ee1af8cbdf49679a8c24f1f3b7d",
   "assets": {

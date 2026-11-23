@@ -6,6 +6,8 @@
 export const Op = {
   AUTH: 0x01, AUTH_OK: 0x02, AUTH_FAIL: 0x03,
   PUT: 0x10, GET: 0x11, GET_RESPONSE: 0x12, DELETE: 0x13, EXISTS: 0x14, EXISTS_RESPONSE: 0x15,
+  // PUT's replacing form: PUT refuses a key that holds a document, UPSERT replaces it.
+  UPSERT: 0x16, UPSERT_OK: 0x17,
   BATCH_PUT: 0x20, BATCH_PUT_OK: 0x21,
   FIFO_PUSH: 0x30, FIFO_POP: 0x31, FIFO_POP_RESPONSE: 0x32, FIFO_PEEK: 0x33,
   // Leases and dead entries (wire.md §4).
@@ -36,6 +38,7 @@ const DEDICATED_REPLY: Partial<Record<OpName, readonly number[]>> = {
   AUTH: [Op.AUTH_OK, Op.AUTH_FAIL],
   GET: [Op.GET_RESPONSE],
   EXISTS: [Op.EXISTS_RESPONSE],
+  UPSERT: [Op.UPSERT_OK],
   BATCH_PUT: [Op.BATCH_PUT_OK],
   FIFO_POP: [Op.FIFO_POP_RESPONSE],
   LIFO_POP: [Op.LIFO_POP_RESPONSE],
@@ -52,7 +55,7 @@ const DEDICATED_REPLY: Partial<Record<OpName, readonly number[]>> = {
 // An answer only; a driver never sends one. AUTH_FAIL is here because the table above still has
 // to name it as the second thing AUTH may come back with.
 const ANSWERS_ONLY: readonly OpName[] = [
-  'AUTH_OK', 'AUTH_FAIL', 'GET_RESPONSE', 'EXISTS_RESPONSE', 'BATCH_PUT_OK',
+  'AUTH_OK', 'AUTH_FAIL', 'GET_RESPONSE', 'EXISTS_RESPONSE', 'UPSERT_OK', 'BATCH_PUT_OK',
   'FIFO_POP_RESPONSE', 'LIFO_POP_RESPONSE', 'HEAP_POP_RESPONSE', 'BTREE_RESPONSE',
   'BLOB_READ_RESPONSE', 'GET_FAST_RESPONSE', 'PONG', 'ERROR',
 ];

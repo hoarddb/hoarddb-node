@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// A hash bucket: put, get, update with three operators, find, delete.
+// A hash bucket: put, upsert, get, update with three operators, find, delete.
 import { connect } from 'hoarddb';
 
 const client = await connect();
@@ -12,6 +12,18 @@ try {
   await people.put('ada', { Name: 'Ada', Age: 36, Visits: 1, Tags: ['maths'] });
   const ada = await people.get('ada');
   console.log('got', ada._id_, ada.Name, ada.Age);
+
+  // put stores a new document and never replaces one; upsert replaces it, or creates it.
+  try {
+    await people.put('ada', { Name: 'Ada Lovelace' });
+  } catch (err) {
+    if (err.code !== 'DOCUMENT_EXISTS') throw err;
+    console.log('second put is', err.code, err.writeOutcome);
+  }
+  await people.upsert('grace', { Name: 'Grace', Age: 20 });
+  await people.upsert('grace', { Name: 'Grace Hopper', Age: 85 });
+  console.log('upserted', (await people.get('grace')).Name);
+  await people.delete('grace');
 
   const updated = await people.update('ada', {
     $set: { Age: 37 },

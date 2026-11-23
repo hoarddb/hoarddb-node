@@ -116,6 +116,34 @@ function compact<R>(values: Record<string, unknown>): R {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined)) as R;
 }
 
+/** What a caller passed where a key belongs, for the refusal that names it. */
+function describedKey(key: unknown): string {
+  if (key === undefined) return 'undefined';
+  if (key === null) return 'null';
+  if (key === '') return 'an empty string';
+  if (Array.isArray(key)) return 'an array';
+  const type = typeof key;
+  return /^[aeiou]/.test(type) ? `an ${type}` : `a ${type}`;
+}
+
+/**
+ * Refuses a keyed write whose key is not a non-empty string, before a frame exists. The types already
+ * say `string`, but plain JavaScript passes anything, and the server reads a missing or empty key as
+ * "assign one": the write would land under a key nobody asked for, a new one on every call.
+ */
+function requireWriteKey(key: unknown, operation: string, target: string, otherwise: string): void {
+  if (typeof key === 'string' && key !== '') return;
+  throw new InvalidArgumentError({
+    message: `${operation} needs a key: a non-empty string, got ${describedKey(key)}. ${otherwise}`,
+    operation,
+    target,
+    writeOutcome: 'not_applied',
+  });
+}
+
+/** What to do instead, for a document write with no key. */
+const OR_INSERT = 'Pass the key, or use insert(doc) to let the server assign one.';
+
 /** The typed view of a bucket handle: the same object, a narrower static type (decision D-1). */
 export function facet<F>(handle: object): F {
   return handle as unknown as F;
@@ -260,8 +288,17 @@ export class BucketHandle<T extends object = Doc> implements AnyBucket<T> {
   }
 
   async put(key: string, doc: T, opts?: WriteOptions): Promise<WriteResult> {
+    requireWriteKey(key, 'put', this.target, OR_INSERT);
     const answer = await this.#request('put', this.#keyTarget(key), 'PUT', 'write', { key, data: doc }, this.#writeOptions(opts));
     if (answer['success'] === false) throw inbandRefusal(answer, { operation: 'put', target: this.#keyTarget(key) });
+    return writeResultOf(answer);
+  }
+
+  async upsert(key: string, doc: T, opts?: WriteOptions): Promise<WriteResult> {
+    requireWriteKey(key, 'upsert', this.target, OR_INSERT);
+    const target = this.#keyTarget(key);
+    const answer = await this.#request('upsert', target, 'UPSERT', 'write', { key, data: doc }, this.#writeOptions(opts));
+    if (answer['success'] === false) throw inbandRefusal(answer, { operation: 'upsert', target });
     return writeResultOf(answer);
   }
 
@@ -632,6 +669,7 @@ export class BucketHandle<T extends object = Doc> implements AnyBucket<T> {
   }
 
   async putBlob(key: string, data: Uint8Array, opts?: BlobWriteOptions): Promise<BlobWriteResult> {
+    requireWriteKey(key, 'putBlob', this.target, 'Pass the key to store the blob under.');
     const target = this.#keyTarget(key);
     const fields: Record<string, unknown> = { key, data };
     if (opts?.metadata !== undefined) fields['metadata'] = opts.metadata;

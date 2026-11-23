@@ -37,12 +37,15 @@ interface UpdateVector {
   response: { payload_json: { message: string } };
 }
 
-/** Put the vector's setup document under `key`, as JavaScript values, and return the vector. */
+/**
+ * Store the vector's setup document under `key`, as JavaScript values, and return the vector. An upsert:
+ * several tests start from their own document under the same key, and a put never replaces one.
+ */
 async function putSetupOf(name: string, key: string): Promise<UpdateVector> {
   const vector = vectorNamed(name) as unknown as UpdateVector;
   const put = vector.setup.find((step) => step.opcode_name === 'PUT');
   assert.ok(put !== undefined, `${name} has a setup document`);
-  await users.put(key, valuesFromExtendedJson(put.payload_json.data as Record<string, unknown>, 'safe'));
+  await users.upsert(key, valuesFromExtendedJson(put.payload_json.data as Record<string, unknown>, 'safe'));
   return vector;
 }
 

@@ -23,6 +23,9 @@ function expectType<T>(value: T): void {
 
 export function positives(): void {
   expectType<Promise<Stored<User>>>(users.get('k'));
+  void users.upsert('k', { name: 'a', age: 1 }, { writeConcern: 'majority' });
+  void db.btree<User>('t').upsert('k', { name: 'a', age: 1 });
+  void db.bucket<User>('b').upsert('k', { name: 'a', age: 1 });
   expectType<Promise<HeapBucket<Doc>>>(db.createBucket('x', 'heap'));
   expectType<Promise<OpenedBucket<Doc>>>(db.open('x'));
   expectType<Database>(client.defaultDatabase());
@@ -47,6 +50,12 @@ export function positives(): void {
 export function negatives(): void {
   // @ts-expect-error a fifo bucket has no get
   void queue.get('k');
+  // @ts-expect-error a fifo bucket has no upsert: a queue has no key to replace
+  void queue.upsert('k', { a: 1 });
+  // @ts-expect-error a blob bucket has no upsert
+  void files.upsert('k', { a: 1 });
+  // @ts-expect-error nmae is not a field of User
+  void users.upsert('k', { nmae: 'a', age: 1 });
   // @ts-expect-error a hash bucket has no push
   void users.push({ name: 'a', age: 1 });
   // @ts-expect-error a blob bucket has no find

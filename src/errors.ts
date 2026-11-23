@@ -32,6 +32,7 @@ export type ErrorCode =
   | 'DUPLICATE_KEY'
   | 'FIELD_TYPE'
   | 'BATCH_TOO_LARGE'
+  | 'DOCUMENT_EXISTS'
   | 'CONNECTION_FAILED'
   | 'TLS_UNTRUSTED'
   | 'TLS_FINGERPRINT_MISMATCH'
@@ -148,6 +149,8 @@ const HINTS: Readonly<Partial<Record<ErrorCode, string>>> = {
     'The lease ran out and its entries went back to the queue. Claim again with claim(), and extend a long job with delivery.extend(ms) before the lease ends.',
   NOT_FOUND: 'List what exists with db.listBuckets() or client.listDatabases().',
   ALREADY_EXISTS: 'Pass { ifNotExists: true } to make creation repeatable.',
+  DOCUMENT_EXISTS:
+    'put, insert and insertMany never replace a document. Use upsert(key, doc) to replace it, or update(key, ops) to change some of its fields.',
   PERMISSION_DENIED: 'This is a role problem: an administrator grants the role named in the message.',
   INTERNAL: 'Report it with the requestId if it repeats.',
   UNSUPPORTED_VERSION: 'This driver speaks hoarddb/1.',
@@ -322,6 +325,17 @@ export class FieldTypeError extends HoardDBError {
 export class BatchTooLargeError extends HoardDBError {
   constructor(init: ErrorInit) {
     super('BATCH_TOO_LARGE', init);
+  }
+}
+
+/**
+ * A `put`, `insert` or `insertMany` named a key that already holds a document (wire code `0x12`).
+ * Nothing was written: `writeOutcome` is `not_applied`. `upsert(key, doc)` replaces the document and
+ * `update(key, ops)` changes some of its fields.
+ */
+export class DocumentExistsError extends HoardDBError {
+  constructor(init: ErrorInit) {
+    super('DOCUMENT_EXISTS', init);
   }
 }
 
@@ -513,6 +527,7 @@ const SERVER_CLASSES: ReadonlyMap<number, ErrorClass> = new Map<number, ErrorCla
   [0x0f, DuplicateKeyError],
   [0x10, FieldTypeError],
   [0x11, BatchTooLargeError],
+  [0x12, DocumentExistsError],
 ]);
 
 const CODE_BY_WIRE_CODE: ReadonlyMap<number, ErrorCode> = new Map<number, ErrorCode>([
@@ -534,6 +549,7 @@ const CODE_BY_WIRE_CODE: ReadonlyMap<number, ErrorCode> = new Map<number, ErrorC
   [0x0f, 'DUPLICATE_KEY'],
   [0x10, 'FIELD_TYPE'],
   [0x11, 'BATCH_TOO_LARGE'],
+  [0x12, 'DOCUMENT_EXISTS'],
 ]);
 
 const LOCAL_CLASSES: ReadonlyMap<ErrorCode, ErrorClass> = new Map<ErrorCode, ErrorClass>([

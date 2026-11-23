@@ -2,9 +2,37 @@
 
 The driver is before 1.0: a change is made directly, with no alias, and recorded here.
 
+The driver sends the opcodes of the hoardDB server's earlier single-store engine, not the ring protocol
+of a v1.1 server (see the README, "What this driver reaches on a v1.1 server"). Entries below that mention
+a cluster, a cluster owner or copies of a bucket describe that engine's replicated mode, which a v1.1.0
+server refuses to start in.
+
 ## Unreleased
 
 ### Changed
+
+- **`put`, `upsert` and `putBlob` refuse a key that is not a non-empty string** (`undefined`, `null`, a number, an
+  object, `''`) with `InvalidArgumentError` before anything is sent. The server reads a missing or empty key as
+  "assign one", so such a call stored a new document under a key nobody chose, a new one on every call; a number
+  or an object came back as the server's `INTERNAL` and cost the connection. `put('', doc)` used to act as
+  `insert(doc)`: call `insert`. The read verbs, `update`, `delete` and the store-field verbs are unchanged: the
+  server refuses a missing key on each of them and nothing is written.
+- **On a hash or btree bucket, `put` of a key that already holds a document is `DocumentExistsError`** (`code` `DOCUMENT_EXISTS`, wire code
+  `0x12`), with `writeOutcome: 'not_applied'` and a `hint` that names `upsert(key, doc)` and `update(key, ops)`. It
+  was reported as `InternalError` with `code` `UNKNOWN(18)` and the hint to upgrade the driver, and it cost the
+  connection. On those two types the server's `put` inserts and never replaces; `insert` and `insertMany` are
+  refused the same way for an `_id_` that is already held, and `insertMany` is refused whole. A program that
+  relied on `put` to overwrite calls `upsert`. Matches the Go driver's `ErrDocumentExists`. The other types do
+  not refuse: a fifo or lifo bucket adds another entry with the same `_id_`, and a heap bucket replaces the
+  entry that holds the `_id_` at the same priority.
+- The README's quick starts and its hash, btree, update and store-field blocks store their sample documents with
+  `upsert`, so each runs any number of times; the clone line uses `https`.
+- `handbook/operations.md` said `put` replaces and that a `put` to a blob bucket stores the document. On a hash or
+  btree `put` never replaces, the handbook now says what a fifo, a lifo and a heap do with a held `_id_`, and a
+  blob bucket refuses `put` and `insert`: write a blob with `putBlob`.
+- `testdata/driver-vectors/v1.json` is the current shared file again (it was a copy from before `put` stopped
+  replacing), and `test/unit/vectors-drift.test.ts` fails when a file under `testdata/` differs from the shared
+  original beside the package in the hoardDB source tree.
 
 - **A key holding NUL is an `InvalidArgumentError`**, not an `InternalError` ("put failed"), and a value nested past
   100 levels is an `InvalidArgumentError` before anything is sent (it overflowed the stack beyond a few thousand
@@ -22,6 +50,12 @@ The driver is before 1.0: a change is made directly, with no alias, and recorded
 
 ### Added
 
+- **`upsert(key, doc)`** on hash and btree buckets and on an untyped handle (`UPSERT`, `0x16`, answered by
+  `UPSERT_OK`, `0x17`): it replaces the document under the key, or creates it. A field the new document lacks is
+  gone, and the document's store fields are kept. A fifo, lifo, heap or blob bucket refuses it with
+  `InvalidArgumentError`; an empty key is refused before anything is sent. It is never resent after a lost answer.
+  Matches the Go driver's `Bucket.Upsert`. `examples/hash.mjs` is the runnable example. A store field's
+  `put(element, doc)` already replaces its element and is unchanged.
 - `database.alterBucket(name, { replicationFactor })` changes how many copies of a bucket a cluster keeps
   (`ALTER_BUCKET`, `0x8E`) and resolves to `{ message, replicationFactor, previousFactor, pending?, releasing? }`:
   the members an increase newly places, and the members a decrease un-places. It needs the `bucket_rf`
